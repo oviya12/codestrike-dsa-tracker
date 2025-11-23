@@ -149,56 +149,66 @@ const Dashboard: React.FC<Props> = ({ state }) => {
 
   return (
     <div className="space-y-6">
-      {/* Stats Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-sm">
+      {/* Stats Row - 2 Columns on Mobile, 4 on Desktop */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        
+        {/* Daily Streak */}
+        <div className="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-sm">
             <div className="flex justify-between items-start">
-                <div>
-                    <p className="text-slate-400 text-sm font-medium">Daily Streak</p>
-                    <h3 className="text-3xl font-bold text-white mt-1">{state.streak} <span className="text-lg text-slate-500">days</span></h3>
+                <div className="min-w-0">
+                    <p className="text-slate-400 text-[10px] sm:text-sm font-medium truncate">Daily Streak</p>
+                    <h3 className="text-xl sm:text-3xl font-bold text-white mt-1">
+                        {state.streak} <span className="text-xs sm:text-lg text-slate-500 font-normal">days</span>
+                    </h3>
                 </div>
-                <div className="p-2 bg-orange-500/20 rounded-lg text-orange-400">
-                    <Flame size={24} />
+                <div className="p-1.5 sm:p-2 bg-orange-500/20 rounded-lg text-orange-400 shrink-0 ml-2">
+                    <Flame className="w-4 h-4 sm:w-6 sm:h-6" />
                 </div>
             </div>
         </div>
-        <div className="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-sm">
+
+        {/* Total Solved */}
+        <div className="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-sm">
             <div className="flex justify-between items-start">
-                <div>
-                    <p className="text-slate-400 text-sm font-medium">Total Solved</p>
-                    <h3 className="text-3xl font-bold text-white mt-1">{state.totalSolved}</h3>
+                <div className="min-w-0">
+                    <p className="text-slate-400 text-[10px] sm:text-sm font-medium truncate">Total Solved</p>
+                    <h3 className="text-xl sm:text-3xl font-bold text-white mt-1">{state.totalSolved}</h3>
                 </div>
-                <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-400">
-                    <Trophy size={24} />
+                <div className="p-1.5 sm:p-2 bg-indigo-500/20 rounded-lg text-indigo-400 shrink-0 ml-2">
+                    <Trophy className="w-4 h-4 sm:w-6 sm:h-6" />
                 </div>
             </div>
         </div>
-        <div className="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-sm">
+
+        {/* Daily Target */}
+        <div className="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-sm">
             <div className="flex justify-between items-start">
-                <div>
-                    <p className="text-slate-400 text-sm font-medium">Daily Target</p>
-                    <h3 className="text-3xl font-bold text-white mt-1">{state.dailyTarget}</h3>
+                <div className="min-w-0">
+                    <p className="text-slate-400 text-[10px] sm:text-sm font-medium truncate">Daily Target</p>
+                    <h3 className="text-xl sm:text-3xl font-bold text-white mt-1">{state.dailyTarget}</h3>
                 </div>
-                <div className="p-2 bg-emerald-500/20 rounded-lg text-emerald-400">
-                    <Target size={24} />
+                <div className="p-1.5 sm:p-2 bg-emerald-500/20 rounded-lg text-emerald-400 shrink-0 ml-2">
+                    <Target className="w-4 h-4 sm:w-6 sm:h-6" />
                 </div>
             </div>
         </div>
-        <div className="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-sm relative overflow-hidden">
+
+        {/* Short Term Goal */}
+        <div className="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-sm relative overflow-hidden">
             <div className="flex justify-between items-start relative z-10">
-                <div>
-                    <p className="text-slate-400 text-sm font-medium">Short Term Goal</p>
-                    <h3 className="text-3xl font-bold text-white mt-1">
+                <div className="min-w-0">
+                    <p className="text-slate-400 text-[10px] sm:text-sm font-medium truncate">Short Term Goal</p>
+                    <h3 className="text-xl sm:text-3xl font-bold text-white mt-1">
                         {state.goals[0]?.targetCount > 0 
                             ? Math.round((state.goals[0]?.progress / state.goals[0]?.targetCount) * 100) 
                             : 0}%
                     </h3>
                 </div>
-                <div className="p-2 bg-blue-500/20 rounded-lg text-blue-400">
-                    <Activity size={24} />
+                <div className="p-1.5 sm:p-2 bg-blue-500/20 rounded-lg text-blue-400 shrink-0 ml-2">
+                    <Activity className="w-4 h-4 sm:w-6 sm:h-6" />
                 </div>
             </div>
-            <div className="w-full bg-slate-700 h-1.5 rounded-full mt-3 overflow-hidden relative z-10">
+            <div className="w-full bg-slate-700 h-1 sm:h-1.5 rounded-full mt-2 sm:mt-3 overflow-hidden relative z-10">
                 <div 
                     className="bg-blue-500 h-full rounded-full" 
                     style={{ width: `${state.goals[0]?.targetCount > 0 ? (state.goals[0]?.progress / state.goals[0]?.targetCount) * 100 : 0}%`}} 

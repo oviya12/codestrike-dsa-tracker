@@ -8,7 +8,7 @@ import GoalManager from './components/GoalManager';
 import ProblemTimer from './components/ProblemTimer'; 
 import MotivatorModal from './components/MotivatorModal'; 
 import HallOfExcusesModal from './components/HallOfExcusesModal';
-import { LayoutDashboard, Target, Code2, Trophy, Zap, Timer, X, Ghost } from 'lucide-react';
+import { LayoutDashboard, Target, Code2, Trophy, Zap, Timer, X, Ghost, Menu, ChevronDown, ChevronUp } from 'lucide-react';
 
 const App: React.FC = () => {
   const [state, setState] = useState<UserState>(INITIAL_STATE);
@@ -24,6 +24,7 @@ const App: React.FC = () => {
   const [showTimer, setShowTimer] = useState(false); // State for Timer Modal
   const [currentView, setCurrentView] = useState<'dashboard' | 'goals'>('dashboard');
   const [showGuide, setShowGuide] = useState(false); // State for Onboarding Guide
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Mobile Sidebar State
 
   // Computed total for today
   const totalSolvedToday = apiSolvedToday + manualSolvedToday;
@@ -175,7 +176,6 @@ const App: React.FC = () => {
 
     setState(prev => {
         // Update or Create a log entry for today to record the reason
-        // This ensures the Hall of Excuses gets populated
         const newLogs = [...prev.logs];
         const existingLogIndex = newLogs.findIndex(l => l.date.startsWith(todayKey));
 
@@ -187,7 +187,7 @@ const App: React.FC = () => {
                 reasonForMiss: reason
             };
         } else {
-            // Create new log for today (if user hasn't synced/logged anything but is giving up)
+            // Create new log for today
             newLogs.push({
                 date: new Date().toISOString(),
                 solvedCount: totalSolvedToday,
@@ -217,232 +217,274 @@ const App: React.FC = () => {
     }
   };
 
+  // Helper to close sidebar when clicking a nav item on mobile
+  const handleNavClick = (view: 'dashboard' | 'goals') => {
+    setCurrentView(view);
+    setIsSidebarOpen(false); // Close mobile nav after click
+  };
+
   return (
-    <div className="min-h-screen flex bg-[#0f172a] text-slate-200">
+    <div className="min-h-screen bg-[#0f172a] text-slate-200 font-sans selection:bg-indigo-500/30">
       
-      {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col fixed h-full z-10">
-        <div className="p-6 border-b border-slate-800">
-            <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-[#facc15] rounded-lg flex items-center justify-center text-slate-900">
-                    <Code2 size={20} strokeWidth={2.5} />
-                </div>
-                <h1 className="text-xl font-bold text-white tracking-tight">CodeStrike</h1>
-            </div>
-        </div>
-        
-        <nav className="flex-1 p-4 space-y-2">
-            <button 
-              onClick={() => setCurrentView('dashboard')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
-                currentView === 'dashboard' 
-                ? 'bg-indigo-600/10 text-indigo-400 border-indigo-600/20' 
-                : 'text-slate-400 border-transparent hover:bg-slate-800'
-              }`}
-            >
-                <LayoutDashboard size={20} />
-                <span className="font-medium">Dashboard</span>
-            </button>
-            <button 
-              onClick={() => setCurrentView('goals')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
-                currentView === 'goals' 
-                ? 'bg-indigo-600/10 text-indigo-400 border-indigo-600/20' 
-                : 'text-slate-400 border-transparent hover:bg-slate-800'
-              }`}
-            >
-                <Target size={20} />
-                <span className="font-medium">Goals</span>
-            </button>
-
-            {/* Hall of Excuses Button */}
-            <button 
-                onClick={() => setShowExcusesModal(true)}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-transparent text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 transition-colors"
-            >
-                <Ghost size={20} />
-                <span className="font-medium">Hall of Excuses</span>
-            </button>
-
-            {/* Motivator Button */}
-            <button 
-              onClick={() => setShowMotivatorModal(true)}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-transparent text-amber-400 hover:bg-amber-500/10 hover:text-amber-300 transition-colors mt-4 group"
-            >
-                <Zap size={20} className="group-hover:animate-pulse" />
-                <span className="font-medium">Feeling Low? </span>
-            </button>
-        </nav>
-
-        <div className="p-4 border-t border-slate-800">
-             <div className="bg-slate-800 rounded-lg p-4">
-                <h4 className="text-xs font-semibold text-slate-500 uppercase mb-2">Status</h4>
-                <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-300">Today</span>
-                    <span className={`font-mono font-bold ${totalSolvedToday >= state.dailyTarget ? 'text-emerald-400' : 'text-orange-400'}`}>
-                        {totalSolvedToday}/{state.dailyTarget}
-                    </span>
-                </div>
-                <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2">
-                    <div 
-                        className={`h-full rounded-full transition-all duration-500 ${totalSolvedToday >= state.dailyTarget ? 'bg-emerald-500' : 'bg-orange-500'}`}
-                        style={{ width: `${Math.min(100, (totalSolvedToday / state.dailyTarget) * 100)}%`}} 
-                    />
-                </div>
-                <div className="mt-2 flex justify-between text-[10px] text-slate-500">
-                   <span>LC: {apiSolvedToday}</span>
-                   <span>Other: {manualSolvedToday}</span>
-                </div>
+      {/* MOBILE TOP BAR (Sticky) */}
+      <div className="md:hidden sticky top-0 z-50 bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between shadow-md">
+         <div className="flex items-center gap-3">
+             <div className="w-10 h-10 bg-[#facc15] rounded-lg flex items-center justify-center text-slate-900 shadow-lg shadow-yellow-500/20">
+                  <Code2 size={24} strokeWidth={2.5} />
              </div>
-        </div>
-      </aside>
+             <h1 className="text-xl font-bold text-white tracking-tight">CodeStrike</h1>
+         </div>
+         <button 
+             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+             className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-lg border border-slate-700 transition-colors"
+         >
+             {isSidebarOpen ? <ChevronUp size={24} /> : <Menu size={24} />}
+         </button>
+      </div>
 
-      {/* Main Content */}
-      <main className="flex-1 ml-64 p-8">
-        <header className="flex justify-between items-center mb-8">
-            <div>
-                <h2 className="text-2xl font-bold text-white">
-                    {currentView === 'dashboard' ? 'DSA Tracker' : 'Goal Planning'}
-                </h2>
-                <p className="text-slate-400">
-                    {currentView === 'dashboard' ? 'Perhaps impress your goals today. They’re tired of false hope.' : 'Set and edit your short and long term objectives.'}
-                </p>
-            </div>
-            <div className="flex items-center gap-3">
-                <div className="relative">
-                    <button
-                        onClick={() => {
-                            setShowTimer(true);
-                            setShowGuide(false);
-                        }}
-                        className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-sm font-medium transition-all shadow-sm"
-                    >
-                        <Timer size={18} className="text-indigo-400" />
-                        Start Focus Timer
-                    </button>
-
-                    {showGuide && (
-                        <div className="absolute top-full mt-4 right-0 w-max bg-indigo-600 text-white text-lg font-bold py-6 px-8 rounded-2xl shadow-xl shadow-indigo-900/30 z-50 animate-in fade-in slide-in-from-top-2 duration-500">
-                            <div className="absolute -top-2 right-8 w-4 h-4 bg-indigo-600 transform rotate-45"></div>
-                            <div className="relative flex items-center gap-4">
-                                <span>Let's begin solving! 🚀</span>
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); setShowGuide(false); }} 
-                                    className="text-indigo-200 hover:text-white transition-colors"
-                                >
-                                    <X size={20} />
-                                </button>
-                            </div>
-                        </div>
-                    )}
+      <div className="flex flex-col md:flex-row min-h-screen">
+          
+          {/* SIDEBAR NAVIGATION */}
+          {/* Desktop: Fixed Left | Mobile: Collapsible Top Block */}
+          <aside className={`
+            bg-slate-900 md:border-r border-slate-800 flex-shrink-0 z-40
+            md:w-64 md:fixed md:inset-y-0 md:flex md:flex-col
+            ${isSidebarOpen ? 'block w-full border-b' : 'hidden md:block'}
+          `}>
+            {/* Sidebar Header (Desktop Only) */}
+            <div className="hidden md:flex p-6 border-b border-slate-800 justify-between items-center">
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-[#facc15] rounded-lg flex items-center justify-center text-slate-900 shadow-lg shadow-yellow-500/20">
+                        <Code2 size={20} strokeWidth={2.5} />
+                    </div>
+                    <h1 className="text-xl font-bold text-white tracking-tight">CodeStrike</h1>
                 </div>
-
-                {isTargetMet ? (
-                     <button 
-                        onClick={() => setShowCongratsModal(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600/10 border border-emerald-500/30 text-emerald-400 rounded-lg text-sm font-bold transition-colors hover:bg-emerald-600/20"
-                    >
-                        <Trophy size={16} className="text-yellow-400" />
-                        Target Achieved! 🌟
-                    </button>
-                ) : (
-                    <button 
-                        onClick={checkEndOfDay}
-                        className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/50 text-red-400 rounded-lg text-sm font-bold transition-all"
-                    >
-                        <span>I Give Up</span>
-                        <span className="text-lg">😔</span>
-                    </button>
-                )}
             </div>
-        </header>
+            
+            <nav className="p-4 space-y-2 overflow-y-auto custom-scrollbar md:flex-1">
+                <button 
+                  onClick={() => handleNavClick('dashboard')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
+                    currentView === 'dashboard' 
+                    ? 'bg-indigo-600/10 text-indigo-400 border-indigo-600/20' 
+                    : 'text-slate-400 border-transparent hover:bg-slate-800'
+                  }`}
+                >
+                    <LayoutDashboard size={20} />
+                    <span className="font-medium">Dashboard</span>
+                </button>
+                <button 
+                  onClick={() => handleNavClick('goals')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
+                    currentView === 'goals' 
+                    ? 'bg-indigo-600/10 text-indigo-400 border-indigo-600/20' 
+                    : 'text-slate-400 border-transparent hover:bg-slate-800'
+                  }`}
+                >
+                    <Target size={20} />
+                    <span className="font-medium">Goals</span>
+                </button>
 
-        {currentView === 'dashboard' ? (
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-                {/* Left Column: Stats & Charts */}
-                <div className="xl:col-span-2 space-y-8">
-                    <Dashboard state={state} /> 
+                <button 
+                    onClick={() => {
+                        setShowExcusesModal(true);
+                        setIsSidebarOpen(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-transparent text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 transition-colors"
+                >
+                    <Ghost size={20} />
+                    <span className="font-medium">Hall of Excuses</span>
+                </button>
+
+                <button 
+                  onClick={() => {
+                      setShowMotivatorModal(true);
+                      setIsSidebarOpen(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-transparent text-amber-400 hover:bg-amber-500/10 hover:text-amber-300 transition-colors mt-4 group"
+                >
+                    <Zap size={20} className="group-hover:animate-pulse" />
+                    <span className="font-medium">Feeling Low? </span>
+                </button>
+            </nav>
+
+            {/* Status Widget */}
+            <div className="p-4 border-t border-slate-800">
+                 <div className="bg-slate-800 rounded-lg p-4 shadow-inner border border-slate-700/50">
+                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">STATUS</h4>
+                    <div className="flex items-center justify-between text-sm mb-2">
+                        <span className="text-slate-300 font-medium">Today</span>
+                        <span className={`font-mono font-bold ${totalSolvedToday >= state.dailyTarget ? 'text-emerald-400' : 'text-orange-400'}`}>
+                            {totalSolvedToday}/{state.dailyTarget}
+                        </span>
+                    </div>
+                    <div className="w-full bg-slate-700 h-1.5 rounded-full mb-3 overflow-hidden">
+                        <div 
+                            className={`h-full rounded-full transition-all duration-500 ${totalSolvedToday >= state.dailyTarget ? 'bg-emerald-500' : 'bg-orange-500'}`}
+                            style={{ width: `${Math.min(100, (totalSolvedToday / state.dailyTarget) * 100)}%`}} 
+                        />
+                    </div>
+                    <div className="flex justify-between text-[10px] text-slate-500 font-medium border-t border-slate-700/50 pt-2">
+                       <span>LC: {apiSolvedToday}</span>
+                       <span>Other: {manualSolvedToday}</span>
+                    </div>
+                 </div>
+            </div>
+          </aside>
+
+          {/* MAIN CONTENT AREA */}
+          <main className="flex-1 md:ml-64 p-4 sm:p-6 md:p-8 w-full min-w-0">
+            
+            <header className="flex flex-col md:flex-row justify-between gap-4 mb-6 md:mb-8">
+                {/* Page Title & Subtitle - Visible on ALL screen sizes */}
+                <div className="block">
+                    <h2 className="text-xl md:text-2xl font-bold text-white">
+                        {currentView === 'dashboard' ? 'DSA Tracker' : 'Goal Planning'}
+                    </h2>
+                    <p className="text-sm md:text-base text-slate-400 mt-1">
+                        {currentView === 'dashboard' ? 'Perhaps impress your goals today.' : 'Set and edit your short and long term objectives.'}
+                    </p>
                 </div>
                 
-                {/* Right Column: Tools (Tracker, Goals) */}
-                <div className="xl:col-span-1 space-y-8">
-                    <Tracker onUpdate={handleUpdateProgress} onSyncComplete={handleSyncComplete} />
-                    
-                    {/* Active Goals Summary (Read Only View) */}
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                            <h3 className="text-lg font-semibold text-white">Active Goals</h3>
-                            <button 
-                                onClick={() => setCurrentView('goals')}
-                                className="text-xs text-indigo-400 hover:text-indigo-300"
-                            >
-                                Manage
-                            </button>
-                        </div>
-                        {state.goals.map(goal => (
-                            <div key={goal.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className={`text-xs font-bold px-2 py-1 rounded border ${
-                                        goal.type === 'LONG_TERM' 
-                                        ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' 
-                                        : 'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                                    }`}>
-                                        {goal.type === 'LONG_TERM' ? 'LONG TERM' : 'SHORT TERM'}
-                                    </span>
-                                    <span className="text-xs text-slate-500">Due: {goal.deadline}</span>
-                                </div>
-                                <h4 className="text-slate-200 font-medium mb-3">{goal.description}</h4>
-                                <div className="flex justify-between text-xs text-slate-400 mb-1">
-                                    <span>Progress</span>
-                                    <span>{goal.progress} / {goal.targetCount}</span>
-                                </div>
-                                <div className="w-full bg-slate-700 h-2 rounded-full overflow-hidden">
-                                    <div 
-                                        className={`h-full rounded-full ${goal.type === 'LONG_TERM' ? 'bg-purple-500' : 'bg-blue-500'}`}
-                                        style={{ width: `${Math.min(100, (goal.progress / goal.targetCount) * 100)}%`}} 
-                                    />
+                {/* Action Buttons (Timer / Give Up) */}
+                <div className="flex items-center gap-2 sm:gap-3 justify-end w-full md:w-auto">
+                    <div className="relative">
+                        <button
+                            onClick={() => {
+                                setShowTimer(true);
+                                setShowGuide(false);
+                            }}
+                            className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs sm:text-sm font-medium transition-all shadow-sm hover:shadow-md"
+                        >
+                            <Timer size={16} className="text-indigo-400" />
+                            <span className="hidden sm:inline">Start Focus Timer</span>
+                            <span className="sm:hidden">Timer</span>
+                        </button>
+
+                        {showGuide && (
+                            <div className="absolute top-full mt-4 right-0 w-max bg-indigo-600 text-white text-base sm:text-lg font-bold py-4 px-6 sm:py-6 sm:px-8 rounded-2xl shadow-xl shadow-indigo-900/30 z-30 animate-in fade-in slide-in-from-top-2 duration-500">
+                                <div className="absolute -top-2 right-8 w-4 h-4 bg-indigo-600 transform rotate-45"></div>
+                                <div className="relative flex items-center gap-4">
+                                    <span>Let's begin solving! 🚀</span>
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); setShowGuide(false); }} 
+                                        className="text-indigo-200 hover:text-white transition-colors"
+                                    >
+                                        <X size={18} />
+                                    </button>
                                 </div>
                             </div>
-                        ))}
+                        )}
+                    </div>
+
+                    {isTargetMet ? (
+                         <button 
+                            onClick={() => setShowCongratsModal(true)}
+                            className="flex items-center gap-2 px-3 py-2 sm:px-4 bg-emerald-600/10 border border-emerald-500/30 text-emerald-400 rounded-lg text-xs sm:text-sm font-bold transition-colors hover:bg-emerald-600/20"
+                        >
+                            <Trophy size={16} className="text-yellow-400" />
+                            <span className="hidden sm:inline">Target Achieved! 🌟</span>
+                            <span className="sm:hidden">Success! 🌟</span>
+                        </button>
+                    ) : (
+                        <button 
+                            onClick={checkEndOfDay}
+                            className="flex items-center gap-2 px-3 py-2 sm:px-4 bg-red-500/10 hover:bg-red-500/20 border border-red-500/50 text-red-400 rounded-lg text-xs sm:text-sm font-bold transition-all"
+                        >
+                            <span>I Give Up</span>
+                            <span className="text-base sm:text-lg">😔</span>
+                        </button>
+                    )}
+                </div>
+            </header>
+
+            {currentView === 'dashboard' ? (
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 md:gap-8">
+                    {/* Left Column: Stats & Charts */}
+                    <div className="xl:col-span-2 space-y-6 md:space-y-8">
+                        <Dashboard state={state} /> 
+                    </div>
+                    
+                    {/* Right Column: Tools (Tracker, Goals) */}
+                    <div className="xl:col-span-1 space-y-6 md:space-y-8">
+                        <Tracker onUpdate={handleUpdateProgress} onSyncComplete={handleSyncComplete} />
+                        
+                        {/* Active Goals Summary (Read Only View) */}
+                        <div className="space-y-4">
+                            <div className="flex justify-between items-center">
+                                <h3 className="text-lg font-semibold text-white">Active Goals</h3>
+                                <button 
+                                    onClick={() => setCurrentView('goals')}
+                                    className="text-xs text-indigo-400 hover:text-indigo-300"
+                                >
+                                    Manage
+                                </button>
+                            </div>
+                            {state.goals.map(goal => (
+                                <div key={goal.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-sm">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border tracking-wider ${
+                                            goal.type === 'LONG_TERM' 
+                                            ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' 
+                                            : 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                                        }`}>
+                                            {goal.type === 'LONG_TERM' ? 'LONG TERM' : 'SHORT TERM'}
+                                        </span>
+                                        <span className="text-[10px] text-slate-500">Due: {goal.deadline}</span>
+                                    </div>
+                                    <h4 className="text-slate-200 font-medium mb-3 text-sm">{goal.description}</h4>
+                                    <div className="flex justify-between text-xs text-slate-400 mb-1">
+                                        <span>Progress</span>
+                                        <span>{goal.progress} / {goal.targetCount}</span>
+                                    </div>
+                                    <div className="w-full bg-slate-700 h-2 rounded-full overflow-hidden">
+                                        <div 
+                                            className={`h-full rounded-full ${goal.type === 'LONG_TERM' ? 'bg-purple-500' : 'bg-blue-500'}`}
+                                            style={{ width: `${Math.min(100, (goal.progress / goal.targetCount) * 100)}%`}} 
+                                        />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </div>
-            </div>
-        ) : (
-            <GoalManager goals={state.goals} onUpdateGoal={handleUpdateGoal} />
-        )}
+            ) : (
+                <GoalManager goals={state.goals} onUpdateGoal={handleUpdateGoal} />
+            )}
 
-        {/* Modals */}
-        <ProblemTimer 
-            isOpen={showTimer} 
-            onClose={() => setShowTimer(false)} 
-        />
+            {/* Modals */}
+            <ProblemTimer 
+                isOpen={showTimer} 
+                onClose={() => setShowTimer(false)} 
+            />
 
-        <MissedTargetModal 
-            isOpen={showMissedModal} 
-            onClose={() => setShowMissedModal(false)}
-            onAdjustTarget={handleTargetAdjustment}
-            state={state}
-            problemsSolvedToday={totalSolvedToday}
-        />
+            <MissedTargetModal 
+                isOpen={showMissedModal} 
+                onClose={() => setShowMissedModal(false)}
+                onAdjustTarget={handleTargetAdjustment}
+                state={state}
+                problemsSolvedToday={totalSolvedToday}
+            />
 
-        <CongratulationsModal 
-            isOpen={showCongratsModal}
-            onClose={handleCloseCongrats}
-            state={state}
-            totalSolvedToday={totalSolvedToday}
-        />
+            <CongratulationsModal 
+                isOpen={showCongratsModal}
+                onClose={handleCloseCongrats}
+                state={state}
+                totalSolvedToday={totalSolvedToday}
+            />
 
-        <MotivatorModal 
-            isOpen={showMotivatorModal}
-            onClose={() => setShowMotivatorModal(false)}
-        />
+            <MotivatorModal 
+                isOpen={showMotivatorModal}
+                onClose={() => setShowMotivatorModal(false)}
+            />
 
-        <HallOfExcusesModal 
-            isOpen={showExcusesModal} 
-            onClose={() => setShowExcusesModal(false)} 
-            logs={state.logs} 
-        />
-      </main>
+            <HallOfExcusesModal 
+                isOpen={showExcusesModal} 
+                onClose={() => setShowExcusesModal(false)} 
+                logs={state.logs} 
+            />
+          </main>
+      </div>
     </div>
   );
 };
