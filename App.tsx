@@ -8,9 +8,18 @@ import GoalManager from './components/GoalManager';
 import ProblemTimer from './components/ProblemTimer'; 
 import MotivatorModal from './components/MotivatorModal'; 
 import HallOfExcusesModal from './components/HallOfExcusesModal';
-import { LayoutDashboard, Target, Code2, Trophy, Zap, Timer, X, Ghost, Menu, ChevronDown, ChevronUp } from 'lucide-react';
+import Auth from './components/Auth';
+import { LayoutDashboard, Target, Code2, Trophy, Zap, Timer, X, Ghost, Menu, ChevronUp, LogOut, Loader2, Trash2, AlertTriangle } from 'lucide-react';
+
+// Supabase Integration
+import { supabase } from './lib/supabase';
+import { fetchFullUserState, updateProfileStats, updateGoalProgress, addOrUpdateLog, updateGoalDetails, deleteAccount } from './services/dbServices';
+import { Session } from '@supabase/supabase-js';
 
 const App: React.FC = () => {
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+
   const [state, setState] = useState<UserState>(INITIAL_STATE);
   
   // Separate counters for accurate tracking
@@ -19,150 +28,232 @@ const App: React.FC = () => {
   
   const [showMissedModal, setShowMissedModal] = useState(false);
   const [showCongratsModal, setShowCongratsModal] = useState(false);
-  const [showMotivatorModal, setShowMotivatorModal] = useState(false); // State for Motivator
-  const [showExcusesModal, setShowExcusesModal] = useState(false); // State for Hall of Excuses
-  const [showTimer, setShowTimer] = useState(false); // State for Timer Modal
+  const [showMotivatorModal, setShowMotivatorModal] = useState(false); 
+  const [showExcusesModal, setShowExcusesModal] = useState(false); 
+  const [showTimer, setShowTimer] = useState(false); 
   const [currentView, setCurrentView] = useState<'dashboard' | 'goals'>('dashboard');
-  const [showGuide, setShowGuide] = useState(false); // State for Onboarding Guide
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Mobile Sidebar State
+  const [showGuide, setShowGuide] = useState(false); 
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
+  
+  // Delete Account State
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // --- Auth & Data Loading ---
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) loadUserData(session.user.id);
+      else setLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) loadUserData(session.user.id);
+      else setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const loadUserData = async (userId: string) => {
+    setLoading(true);
+    const userState = await fetchFullUserState(userId);
+    if (userState) {
+      setState(userState);
+      
+      // Hydrate today's counters from the fetched logs
+      const todayKey = new Date().toISOString().split('T')[0];
+      const todayLog = userState.logs.find(l => l.date.startsWith(todayKey));
+      
+      if (todayLog) {
+        setApiSolvedToday(todayLog.platformBreakdown[Platform.LeetCode] || 0);
+        setManualSolvedToday(todayLog.solvedCount - (todayLog.platformBreakdown[Platform.LeetCode] || 0));
+      } else {
+        setApiSolvedToday(0);
+        setManualSolvedToday(0);
+      }
+    }
+    setLoading(false);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setState(INITIAL_STATE);
+  };
+
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    try {
+      await deleteAccount();
+      await supabase.auth.signOut();
+      setState(INITIAL_STATE);
+      setShowDeleteConfirm(false);
+    } catch (error) {
+      console.error("Failed to delete account:", error);
+      alert("Failed to delete account. Please try again.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Computed total for today
   const totalSolvedToday = apiSolvedToday + manualSolvedToday;
   const isTargetMet = totalSolvedToday >= state.dailyTarget;
 
-  // Effect to check daily target status (Simulating end of day check or live updates)
+  // Effect to check daily target status
   useEffect(() => {
     if (totalSolvedToday > 0 && totalSolvedToday < state.dailyTarget) {
-       // In a real app, this might trigger on a timer or specific event. 
+       // Logic to track near-misses could go here
     }
   }, [totalSolvedToday, state.dailyTarget]);
 
-  // Show onboarding guide on load
+  // Show onboarding guide on load (only if loaded)
   useEffect(() => {
-    const timer = setTimeout(() => setShowGuide(true), 1000);
-    // Auto dismiss after 10 seconds to not be annoying
-    const autoDismiss = setTimeout(() => setShowGuide(false), 11000); 
-    return () => {
-        clearTimeout(timer);
-        clearTimeout(autoDismiss);
-    };
-  }, []);
+    if (!loading && session) {
+        const timer = setTimeout(() => setShowGuide(true), 1000);
+        const autoDismiss = setTimeout(() => setShowGuide(false), 11000); 
+        return () => {
+            clearTimeout(timer);
+            clearTimeout(autoDismiss);
+        };
+    }
+  }, [loading, session]);
 
   // Handlers for manual updates (Other Platforms)
-  const handleUpdateProgress = (count: number) => {
-    setManualSolvedToday(prev => prev + count);
+  const handleUpdateProgress = async (count: number) => {
+    if (!session) return;
+
+    const newManualCount = manualSolvedToday + count;
+    const newTotalSolved = state.totalSolved + count;
+    setManualSolvedToday(newManualCount);
     
-    // Update Goals Progress
+    // Optimistic UI Updates
     const updatedGoals = state.goals.map(g => {
         if (g.type === 'SHORT_TERM' || g.type === 'LONG_TERM') {
+            // DB Update
+            updateGoalProgress(g.id, g.progress + count);
             return { ...g, progress: g.progress + count };
         }
         return g;
     });
 
+    // DB Updates
+    await updateProfileStats(session.user.id, { totalSolved: newTotalSolved });
+
+    // Log Update
+    const todayKey = new Date().toISOString();
+    const logEntry: DailyLog = {
+        date: todayKey,
+        solvedCount: apiSolvedToday + newManualCount,
+        platformBreakdown: { [Platform.LeetCode]: apiSolvedToday },
+        missedTarget: false
+    };
+    await addOrUpdateLog(session.user.id, logEntry);
+
     const newState = {
         ...state,
-        totalSolved: state.totalSolved + count,
+        totalSolved: newTotalSolved,
         goals: updatedGoals,
         logs: [
-            ...state.logs, 
-            {
-                date: new Date().toISOString(),
-                solvedCount: count,
-                platformBreakdown: { [Platform.LeetCode]: 0 }, // Manual Entry flag
-                missedTarget: false
-            }
+            ...state.logs.filter(l => !l.date.startsWith(todayKey.split('T')[0])), 
+            logEntry
         ]
     };
-    
     setState(newState);
 
-    // Auto-trigger celebration if they just crossed the line manually
-    const newTotal = apiSolvedToday + manualSolvedToday + count;
-    if (newTotal >= state.dailyTarget && totalSolvedToday < state.dailyTarget) {
+    // Check for celebration
+    if (apiSolvedToday + newManualCount >= state.dailyTarget && totalSolvedToday < state.dailyTarget) {
         setShowCongratsModal(true);
     }
   };
 
   // Handler for API Sync (LeetCode)
-  const handleSyncComplete = (data: { logs: DailyLog[], totalSolved: number, solvedToday: number }) => {
+  const handleSyncComplete = async (data: { logs: DailyLog[], totalSolved: number, solvedToday: number }) => {
+    if (!session) return;
+
     setApiSolvedToday(data.solvedToday);
 
-    // Calculate Streak based on logs
+    // Calculate Streak Logic (Simplified for brevity, reuse logic)
     let streak = 0;
     if (data.logs.length > 0) {
-        const sortedLogs = [...data.logs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        const today = new Date().toISOString().split('T')[0];
-        const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-        
-        let hasActivityToday = sortedLogs[0].date.startsWith(today) && sortedLogs[0].solvedCount > 0;
-        let currentIdx = hasActivityToday ? 0 : (sortedLogs[0].date.startsWith(yesterday) ? 0 : -1);
-
-        if (currentIdx !== -1) {
+         // ... (Existing streak logic reuse or move to helper)
+         // For now, assume scraperService passes full logs, we re-calc streak
+         // NOTE: In a real DB app, we might calculate streak on server or daily via cron
+         // Here we trust the UI calculation for immediate feedback
+         const sortedLogs = [...data.logs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+         // ... (Same streak algo as before)
+         const today = new Date().toISOString().split('T')[0];
+         const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+         let hasActivityToday = sortedLogs[0].date.startsWith(today) && sortedLogs[0].solvedCount > 0;
+         let currentIdx = hasActivityToday ? 0 : (sortedLogs[0].date.startsWith(yesterday) ? 0 : -1);
+         if (currentIdx !== -1) {
              let expectedDate = new Date(sortedLogs[currentIdx].date);
-             
              for (let i = currentIdx; i < sortedLogs.length; i++) {
                  const logDate = new Date(sortedLogs[i].date);
-                 if (i === currentIdx) {
-                     streak++;
-                     continue;
-                 }
+                 if (i === currentIdx) { streak++; continue; }
                  const diffTime = Math.abs(expectedDate.getTime() - logDate.getTime());
                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-                 if (diffDays === 1) {
-                     streak++;
-                     expectedDate = logDate;
-                 } else {
-                     break;
-                 }
+                 if (diffDays === 1) { streak++; expectedDate = logDate; } else { break; }
              }
         }
     }
 
-    setState(prev => {
-        // Filter to keep existing logs that are Manual entries (LeetCode count 0)
-        const existingManualLogs = prev.logs.filter(l => 
-            l.platformBreakdown[Platform.LeetCode] === 0
-        );
+    // Merge Logic
+    const existingManualLogs = state.logs.filter(l => l.platformBreakdown[Platform.LeetCode] === 0);
+    const manualTotal = existingManualLogs.reduce((sum, log) => sum + log.solvedCount, 0);
+    const newTotalSolved = data.totalSolved + manualTotal;
 
-        // Calculate total from manual logs (Historical + Today's manual logs)
-        const manualTotal = existingManualLogs.reduce((sum, log) => sum + log.solvedCount, 0);
-        const newTotalSolved = data.totalSolved + manualTotal;
+    // Update DB
+    await updateProfileStats(session.user.id, { totalSolved: newTotalSolved, streak });
+    
+    // Bulk update logs would be heavy, usually we just sync today's log or rely on the detailed array
+    // For this app's scope, we push the latest LEETCODE logs to DB if they are new? 
+    // Or simpler: We just update Today's log in DB
+    const todayKey = new Date().toISOString();
+    const todayLog = {
+        date: todayKey,
+        solvedCount: data.solvedToday + manualSolvedToday,
+        platformBreakdown: { [Platform.LeetCode]: data.solvedToday },
+        missedTarget: false
+    };
+    await addOrUpdateLog(session.user.id, todayLog);
 
-        // Update Goals Progress based on the new total
-        const updatedGoals = prev.goals.map(g => {
-            if (g.type === 'SHORT_TERM' || g.type === 'LONG_TERM') {
-                return { ...g, progress: newTotalSolved };
-            }
-            return g;
-        });
-
-        return {
-            ...prev,
-            totalSolved: newTotalSolved,
-            streak: streak,
-            goals: updatedGoals, 
-            logs: [...data.logs, ...existingManualLogs], 
-            lastSync: new Date().toISOString()
-        };
+    // Update Goals
+    const updatedGoals = state.goals.map(g => {
+        if (g.type === 'SHORT_TERM' || g.type === 'LONG_TERM') {
+            updateGoalProgress(g.id, newTotalSolved);
+            return { ...g, progress: newTotalSolved };
+        }
+        return g;
     });
 
-    // Auto-trigger celebration if sync pushed them over the line
+    setState(prev => ({
+        ...prev,
+        totalSolved: newTotalSolved,
+        streak: streak,
+        goals: updatedGoals, 
+        logs: [...data.logs, ...existingManualLogs], 
+        lastSync: new Date().toISOString()
+    }));
+
     if ((data.solvedToday + manualSolvedToday) >= state.dailyTarget && totalSolvedToday < state.dailyTarget) {
         setShowCongratsModal(true);
     }
   };
 
-  const handleUpdateGoal = (updatedGoal: Goal) => {
+  const handleUpdateGoal = async (updatedGoal: Goal) => {
+    if (!session) return;
+    await updateGoalDetails(updatedGoal);
     setState(prev => ({
       ...prev,
       goals: prev.goals.map(g => g.id === updatedGoal.id ? updatedGoal : g)
     }));
   };
 
-  // Simulate "End of Day" check with real values
   const checkEndOfDay = () => {
-    // Trigger analysis if total (API + Manual) < Target
     if (totalSolvedToday < state.dailyTarget) {
         setShowMissedModal(true);
     } else {
@@ -170,58 +261,61 @@ const App: React.FC = () => {
     }
   };
 
-  const handleTargetAdjustment = (deficit: number, reason: string) => {
-    // Add the missed problems (deficit) to the daily target
-    const todayKey = new Date().toISOString().split('T')[0];
+  const handleTargetAdjustment = async (deficit: number, reason: string) => {
+    if (!session) return;
+    
+    const newTarget = state.dailyTarget + deficit;
+    await updateProfileStats(session.user.id, { dailyTarget: newTarget });
+
+    const todayKey = new Date().toISOString();
+    const logEntry = {
+        date: todayKey,
+        solvedCount: totalSolvedToday,
+        platformBreakdown: { [Platform.LeetCode]: apiSolvedToday },
+        missedTarget: true,
+        reasonForMiss: reason
+    };
+    await addOrUpdateLog(session.user.id, logEntry);
 
     setState(prev => {
-        // Update or Create a log entry for today to record the reason
         const newLogs = [...prev.logs];
-        const existingLogIndex = newLogs.findIndex(l => l.date.startsWith(todayKey));
-
-        if (existingLogIndex >= 0) {
-            // Update existing log
-            newLogs[existingLogIndex] = {
-                ...newLogs[existingLogIndex],
-                missedTarget: true,
-                reasonForMiss: reason
-            };
-        } else {
-            // Create new log for today
-            newLogs.push({
-                date: new Date().toISOString(),
-                solvedCount: totalSolvedToday,
-                platformBreakdown: { [Platform.LeetCode]: 0 },
-                missedTarget: true,
-                reasonForMiss: reason
-            });
-        }
-
+        // Simple UI update logic, real data is in DB now
+        newLogs.push(logEntry);
         return {
           ...prev,
-          dailyTarget: prev.dailyTarget + deficit,
+          dailyTarget: newTarget,
           logs: newLogs
         };
     });
     setShowMissedModal(false);
   };
 
-  const handleCloseCongrats = () => {
+  const handleCloseCongrats = async () => {
     setShowCongratsModal(false);
-    // If the target was elevated (due to catch-up), reset it to default (3) for the next day/cycle
-    if (state.dailyTarget > 3) {
-        setState(prev => ({
-            ...prev,
-            dailyTarget: 3
-        }));
+    if (state.dailyTarget > 3 && session) {
+        await updateProfileStats(session.user.id, { dailyTarget: 3 });
+        setState(prev => ({ ...prev, dailyTarget: 3 }));
     }
   };
 
-  // Helper to close sidebar when clicking a nav item on mobile
   const handleNavClick = (view: 'dashboard' | 'goals') => {
     setCurrentView(view);
-    setIsSidebarOpen(false); // Close mobile nav after click
+    setIsSidebarOpen(false);
   };
+
+  // --- Render ---
+
+  if (loading) {
+      return (
+          <div className="min-h-screen bg-[#0f172a] flex items-center justify-center">
+              <Loader2 className="text-indigo-500 animate-spin" size={48} />
+          </div>
+      );
+  }
+
+  if (!session) {
+      return <Auth />;
+  }
 
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-200 font-sans selection:bg-indigo-500/30">
@@ -245,13 +339,11 @@ const App: React.FC = () => {
       <div className="flex flex-col md:flex-row min-h-screen">
           
           {/* SIDEBAR NAVIGATION */}
-          {/* Desktop: Fixed Left | Mobile: Collapsible Top Block */}
           <aside className={`
             bg-slate-900 md:border-r border-slate-800 flex-shrink-0 z-40
             md:w-64 md:fixed md:inset-y-0 md:flex md:flex-col
             ${isSidebarOpen ? 'block w-full border-b' : 'hidden md:block'}
           `}>
-            {/* Sidebar Header (Desktop Only) */}
             <div className="hidden md:flex p-6 border-b border-slate-800 justify-between items-center">
                 <div className="flex items-center gap-3">
                     <div className="w-8 h-8 bg-[#facc15] rounded-lg flex items-center justify-center text-slate-900 shadow-lg shadow-yellow-500/20">
@@ -308,27 +400,22 @@ const App: React.FC = () => {
                 </button>
             </nav>
 
-            {/* Status Widget */}
-            <div className="p-4 border-t border-slate-800">
-                 <div className="bg-slate-800 rounded-lg p-4 shadow-inner border border-slate-700/50">
-                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">STATUS</h4>
-                    <div className="flex items-center justify-between text-sm mb-2">
-                        <span className="text-slate-300 font-medium">Today</span>
-                        <span className={`font-mono font-bold ${totalSolvedToday >= state.dailyTarget ? 'text-emerald-400' : 'text-orange-400'}`}>
-                            {totalSolvedToday}/{state.dailyTarget}
-                        </span>
-                    </div>
-                    <div className="w-full bg-slate-700 h-1.5 rounded-full mb-3 overflow-hidden">
-                        <div 
-                            className={`h-full rounded-full transition-all duration-500 ${totalSolvedToday >= state.dailyTarget ? 'bg-emerald-500' : 'bg-orange-500'}`}
-                            style={{ width: `${Math.min(100, (totalSolvedToday / state.dailyTarget) * 100)}%`}} 
-                        />
-                    </div>
-                    <div className="flex justify-between text-[10px] text-slate-500 font-medium border-t border-slate-700/50 pt-2">
-                       <span>LC: {apiSolvedToday}</span>
-                       <span>Other: {manualSolvedToday}</span>
-                    </div>
-                 </div>
+            {/* Bottom Actions */}
+            <div className="p-4 border-t border-slate-800 bg-slate-900/50 space-y-2">
+                <button 
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors text-sm"
+                >
+                    <LogOut size={16} />
+                    <span>Sign Out</span>
+                </button>
+                <button 
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors text-sm"
+                >
+                    <Trash2 size={16} />
+                    <span>Delete Account</span>
+                </button>
             </div>
           </aside>
 
@@ -336,17 +423,15 @@ const App: React.FC = () => {
           <main className="flex-1 md:ml-64 p-4 sm:p-6 md:p-8 w-full min-w-0">
             
             <header className="flex flex-col md:flex-row justify-between gap-4 mb-6 md:mb-8">
-                {/* Page Title & Subtitle - Visible on ALL screen sizes */}
                 <div className="block">
                     <h2 className="text-xl md:text-2xl font-bold text-white">
                         {currentView === 'dashboard' ? 'DSA Tracker' : 'Goal Planning'}
                     </h2>
                     <p className="text-sm md:text-base text-slate-400 mt-1">
-                        {currentView === 'dashboard' ? 'Perhaps impress your goals today.' : 'Set and edit your short and long term objectives.'}
+                        {currentView === 'dashboard' ? `Welcome back, ${session.user.email?.split('@')[0]}` : 'Set and edit your short and long term objectives.'}
                     </p>
                 </div>
                 
-                {/* Action Buttons (Timer / Give Up) */}
                 <div className="flex items-center gap-2 sm:gap-3 justify-end w-full md:w-auto">
                     <div className="relative">
                         <button
@@ -400,16 +485,11 @@ const App: React.FC = () => {
 
             {currentView === 'dashboard' ? (
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 md:gap-8">
-                    {/* Left Column: Stats & Charts */}
                     <div className="xl:col-span-2 space-y-6 md:space-y-8">
                         <Dashboard state={state} /> 
                     </div>
-                    
-                    {/* Right Column: Tools (Tracker, Goals) */}
                     <div className="xl:col-span-1 space-y-6 md:space-y-8">
                         <Tracker onUpdate={handleUpdateProgress} onSyncComplete={handleSyncComplete} />
-                        
-                        {/* Active Goals Summary (Read Only View) */}
                         <div className="space-y-4">
                             <div className="flex justify-between items-center">
                                 <h3 className="text-lg font-semibold text-white">Active Goals</h3>
@@ -483,6 +563,39 @@ const App: React.FC = () => {
                 onClose={() => setShowExcusesModal(false)} 
                 logs={state.logs} 
             />
+
+            {/* DELETE ACCOUNT CONFIRMATION MODAL */}
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-slate-900 border border-red-500/30 w-full max-w-sm rounded-2xl shadow-2xl p-6 text-center">
+                        <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <AlertTriangle className="text-red-500" size={32} />
+                        </div>
+                        <h2 className="text-xl font-bold text-white mb-2">Delete Account?</h2>
+                        <p className="text-slate-400 text-sm mb-6">
+                            This action is <span className="text-red-400 font-bold">irreversible</span>. All your data, streaks, and logs will be permanently wiped.
+                        </p>
+                        
+                        <div className="space-y-3">
+                            <button 
+                                onClick={handleDeleteAccount}
+                                disabled={isDeleting}
+                                className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-colors shadow-lg shadow-red-900/20 flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                {isDeleting ? <Loader2 className="animate-spin" size={20} /> : <Trash2 size={20} />}
+                                {isDeleting ? 'Deleting...' : 'Yes, Delete Everything'}
+                            </button>
+                            <button 
+                                onClick={() => setShowDeleteConfirm(false)}
+                                disabled={isDeleting}
+                                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-xl transition-colors border border-slate-700"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
           </main>
       </div>
     </div>
