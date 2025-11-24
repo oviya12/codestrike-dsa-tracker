@@ -13,7 +13,7 @@ import { LayoutDashboard, Target, Code2, Trophy, Zap, Timer, X, Ghost, Menu, Che
 
 // Supabase Integration
 import { supabase } from './lib/supabase';
-import { fetchFullUserState, updateProfileStats, updateGoalProgress, addOrUpdateLog, updateGoalDetails, deleteAccount } from './services/dbService';
+import { fetchFullUserState, updateProfileStats, updateGoalProgress, addOrUpdateLog, updateGoalDetails, deleteAccount } from "./services/dbServices";
 import { Session } from '@supabase/supabase-js';
 
 const App: React.FC = () => {
