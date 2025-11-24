@@ -13,7 +13,7 @@ import { LayoutDashboard, Target, Code2, Trophy, Zap, Timer, X, Ghost, Menu, Che
 
 // Supabase Integration
 import { supabase } from './lib/supabase';
-import { fetchFullUserState, updateProfileStats, updateGoalProgress, addOrUpdateLog, updateGoalDetails, deleteAccount } from './services/dbServices';
+import { fetchFullUserState, updateProfileStats, updateGoalProgress, addOrUpdateLog, updateGoalDetails, deleteAccount } from './services/dbService';
 import { Session } from '@supabase/supabase-js';
 
 const App: React.FC = () => {
@@ -99,18 +99,67 @@ const App: React.FC = () => {
     }
   };
 
+  // --- Helpers ---
+  
+  /**
+   * robustly calculates streak from logs
+   */
+  const calculateStreak = (logs: DailyLog[]): number => {
+    // 1. Group logs by date to handle multiple entries per day (Manual + API)
+    const activityMap = new Map<string, number>();
+    logs.forEach(l => {
+        const date = l.date.split('T')[0];
+        activityMap.set(date, (activityMap.get(date) || 0) + l.solvedCount);
+    });
+
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    let currentStreak = 0;
+    let checkDate = new Date(today);
+
+    // Determine start point:
+    // If we have activity today, streak includes today.
+    // If not today, but we had activity yesterday, streak is still alive (just hasn't incremented for today yet).
+    // If neither, streak is broken (0).
+
+    if ((activityMap.get(todayStr) || 0) > 0) {
+        // Active today
+    } else if ((activityMap.get(yesterdayStr) || 0) > 0) {
+        // Not active today yet, but active yesterday. Start checking from yesterday.
+        checkDate.setDate(checkDate.getDate() - 1);
+    } else {
+        return 0; // Streak broken
+    }
+
+    // Count backwards
+    while (true) {
+        const dateStr = checkDate.toISOString().split('T')[0];
+        if ((activityMap.get(dateStr) || 0) > 0) {
+            currentStreak++;
+            checkDate.setDate(checkDate.getDate() - 1);
+        } else {
+            break;
+        }
+    }
+
+    return currentStreak;
+  };
+
   // Computed total for today
   const totalSolvedToday = apiSolvedToday + manualSolvedToday;
   const isTargetMet = totalSolvedToday >= state.dailyTarget;
 
-  // Effect to check daily target status
   useEffect(() => {
     if (totalSolvedToday > 0 && totalSolvedToday < state.dailyTarget) {
        // Logic to track near-misses could go here
     }
   }, [totalSolvedToday, state.dailyTarget]);
 
-  // Show onboarding guide on load (only if loaded)
   useEffect(() => {
     if (!loading && session) {
         const timer = setTimeout(() => setShowGuide(true), 1000);
@@ -130,19 +179,6 @@ const App: React.FC = () => {
     const newTotalSolved = state.totalSolved + count;
     setManualSolvedToday(newManualCount);
     
-    // Optimistic UI Updates
-    const updatedGoals = state.goals.map(g => {
-        if (g.type === 'SHORT_TERM' || g.type === 'LONG_TERM') {
-            // DB Update
-            updateGoalProgress(g.id, g.progress + count);
-            return { ...g, progress: g.progress + count };
-        }
-        return g;
-    });
-
-    // DB Updates
-    await updateProfileStats(session.user.id, { totalSolved: newTotalSolved });
-
     // Log Update
     const todayKey = new Date().toISOString();
     const logEntry: DailyLog = {
@@ -151,16 +187,35 @@ const App: React.FC = () => {
         platformBreakdown: { [Platform.LeetCode]: apiSolvedToday },
         missedTarget: false
     };
+
+    // Construct new logs array for streak calc
+    const updatedLogs = [
+        ...state.logs.filter(l => !l.date.startsWith(todayKey.split('T')[0])), 
+        logEntry
+    ];
+
+    // Calculate new Streak
+    const newStreak = calculateStreak(updatedLogs);
+
+    // DB Updates
+    await updateProfileStats(session.user.id, { totalSolved: newTotalSolved, streak: newStreak });
     await addOrUpdateLog(session.user.id, logEntry);
+
+    // Optimistic UI Updates
+    const updatedGoals = state.goals.map(g => {
+        if (g.type === 'SHORT_TERM' || g.type === 'LONG_TERM') {
+            updateGoalProgress(g.id, g.progress + count);
+            return { ...g, progress: g.progress + count };
+        }
+        return g;
+    });
 
     const newState = {
         ...state,
         totalSolved: newTotalSolved,
+        streak: newStreak, // Update streak in state
         goals: updatedGoals,
-        logs: [
-            ...state.logs.filter(l => !l.date.startsWith(todayKey.split('T')[0])), 
-            logEntry
-        ]
+        logs: updatedLogs
     };
     setState(newState);
 
@@ -176,42 +231,21 @@ const App: React.FC = () => {
 
     setApiSolvedToday(data.solvedToday);
 
-    // Calculate Streak Logic (Simplified for brevity, reuse logic)
-    let streak = 0;
-    if (data.logs.length > 0) {
-         // ... (Existing streak logic reuse or move to helper)
-         // For now, assume scraperService passes full logs, we re-calc streak
-         // NOTE: In a real DB app, we might calculate streak on server or daily via cron
-         // Here we trust the UI calculation for immediate feedback
-         const sortedLogs = [...data.logs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-         // ... (Same streak algo as before)
-         const today = new Date().toISOString().split('T')[0];
-         const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-         let hasActivityToday = sortedLogs[0].date.startsWith(today) && sortedLogs[0].solvedCount > 0;
-         let currentIdx = hasActivityToday ? 0 : (sortedLogs[0].date.startsWith(yesterday) ? 0 : -1);
-         if (currentIdx !== -1) {
-             let expectedDate = new Date(sortedLogs[currentIdx].date);
-             for (let i = currentIdx; i < sortedLogs.length; i++) {
-                 const logDate = new Date(sortedLogs[i].date);
-                 if (i === currentIdx) { streak++; continue; }
-                 const diffTime = Math.abs(expectedDate.getTime() - logDate.getTime());
-                 const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-                 if (diffDays === 1) { streak++; expectedDate = logDate; } else { break; }
-             }
-        }
-    }
-
-    // Merge Logic
+    // Merge Logic: Get existing manual logs (where LeetCode count is 0)
     const existingManualLogs = state.logs.filter(l => l.platformBreakdown[Platform.LeetCode] === 0);
     const manualTotal = existingManualLogs.reduce((sum, log) => sum + log.solvedCount, 0);
     const newTotalSolved = data.totalSolved + manualTotal;
 
+    // Construct full log history for streak calc (API logs + Manual logs)
+    const mergedLogs = [...data.logs, ...existingManualLogs];
+    
+    // Calculate Streak
+    const streak = calculateStreak(mergedLogs);
+
     // Update DB
     await updateProfileStats(session.user.id, { totalSolved: newTotalSolved, streak });
     
-    // Bulk update logs would be heavy, usually we just sync today's log or rely on the detailed array
-    // For this app's scope, we push the latest LEETCODE logs to DB if they are new? 
-    // Or simpler: We just update Today's log in DB
+    // Update today's log in DB
     const todayKey = new Date().toISOString();
     const todayLog = {
         date: todayKey,
@@ -235,7 +269,7 @@ const App: React.FC = () => {
         totalSolved: newTotalSolved,
         streak: streak,
         goals: updatedGoals, 
-        logs: [...data.logs, ...existingManualLogs], 
+        logs: mergedLogs, 
         lastSync: new Date().toISOString()
     }));
 
@@ -279,7 +313,6 @@ const App: React.FC = () => {
 
     setState(prev => {
         const newLogs = [...prev.logs];
-        // Simple UI update logic, real data is in DB now
         newLogs.push(logEntry);
         return {
           ...prev,
